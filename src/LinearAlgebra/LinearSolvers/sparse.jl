@@ -1,5 +1,7 @@
 using SparseArrays
 using SuiteSparse
+using Krylov
+using LinearOperators
 
 construct_matrix(
     ::Type{SparseMatrixCSC}, m::Int, n::Int,
@@ -184,10 +186,11 @@ mutable struct SparsePosDefLinearSolver{Tv<:BlasReal, Ta<:SparseMatrixCSC{Tv, <:
         m, n = size(A)
         θ = ones(Tv, n)
 
-        S = A * A' + spdiagm(0 => ones(m))
+        #S = A * A' + spdiagm(0 => ones(m))
 
         # TODO: PSD-ness checks
-        F = cholesky(Symmetric(S))
+        # F = cholesky(Symmetric(S))
+        F = nothing
 
         return new{Tv, SparseMatrixCSC{Tv, Int}}(m, n, A, θ, zeros(Tv, n), ones(Tv, m), F)
     end
@@ -223,13 +226,14 @@ function update_linear_solver!(
 
     # Re-compute factorization
     # D = (Θ^{-1} + Rp)^{-1}
-    D = Diagonal(one(Tv) ./ (ls.θ .+ ls.regP))
-    Rd = spdiagm(0 => ls.regD)
-    S = ls.A * D * ls.A' + Rd
+
+    # D = Diagonal(one(Tv) ./ (ls.θ .+ ls.regP))
+    # Rd = spdiagm(0 => ls.regD)
+    # S = ls.A * D * ls.A' + Rd
 
     # Update factorization
-    cholesky!(ls.F, Symmetric(S), check=false)
-    issuccess(ls.F) || throw(PosDefException(0))
+    #cholesky!(ls.F, Symmetric(S), check=false)
+    #issuccess(ls.F) || throw(PosDefException(0))
 
     return nothing
 end
@@ -251,14 +255,22 @@ function solve_augmented_system!(
 ) where{Tv<:BlasReal}
     m, n = ls.m, ls.n
 
+    # Build augmented system
     d = one(Tv) ./ (ls.θ .+ ls.regP)
     D = Diagonal(d)
+    Rd = spdiagm(0 => ls.regD)
+
+    op_Rd = PreallocatedLinearOperator(Rd)
+    op_A = PreallocatedLinearOperator(ls.A)
+    op_D = PreallocatedLinearOperator(D)
+    S = op_A * op_D * op_A' + op_Rd
+    #S = ls.A * D * ls.A' + Rd
     
     # Set-up right-hand side
     ξ_ = ξp .+ ls.A * (D * ξd)
 
     # Solve augmented system
-    dy .= (ls.F \ ξ_)
+    dy .= minres_qlp(S, ξ_, atol=1e-10, rtol=1e-10)[1]
 
     # Recover dx
     dx .= D * (ls.A' * dy - ξd)
