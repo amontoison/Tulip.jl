@@ -108,6 +108,9 @@ include("lapack.jl")
 include("cholmod.jl")
 include("ldlfact.jl")
 include("krylov.jl")
+include("sne.jl")
+include("ls.jl")
+include("ln.jl")
 
 """
     default_factory(T)
